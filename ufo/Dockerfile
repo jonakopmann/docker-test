@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get -y upgrade && apt-get install -y \
@@ -24,7 +24,6 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y \
         libgsl-dev \
         libgirepository1.0-dev \
         pkg-config \
-        qt5-default \
         python3 \
         python-is-python3 \
         python3-dev \
