@@ -1,6 +1,7 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <gst/app/gstappsrc.h>
+#include <gst/app/gstappsink.h>
 
 #include <stdio.h>
 #include <iostream>
@@ -36,7 +37,6 @@ struct _App
     gint ms_int;
 
     GstBufferList* buffer;
-
 };
 
 App s_app;
@@ -49,24 +49,26 @@ read_data(App* app)
 
     GST_DEBUG("feed buffer");
     g_signal_emit_by_name(app->appsrc, "push-buffer-list", app->buffer, &ret);
+    //ret = gst_app_src_push_buffer_list(GST_APP_SRC(app->appsrc), app->buffer);
     
     if (ret != GST_FLOW_OK)
     {
         /* some error, stop sending data */
-        GST_DEBUG("some error %d", ret);
+        GST_DEBUG("failed to push buffers %d", ret);
         return FALSE;
     }
 
-    g_signal_emit_by_name(app->appsrc, "enough-data", &ret);
-    
+    /* signal eos */
+    ret = gst_app_src_end_of_stream(GST_APP_SRC(app->appsrc));
+    app->eos = TRUE;
+
     if (ret != GST_FLOW_OK)
     {
-        /* some error, stop sending data */
-        GST_DEBUG("some error %d", ret);
-        return FALSE;
+        // some error, stop sending data
+        GST_DEBUG("failed to set eos %d", ret);
     }
 
-    return TRUE;
+    return FALSE;
 }
 
 /* This signal callback is called when appsrc needs data, we add an idle handler
@@ -74,7 +76,7 @@ read_data(App* app)
 static void
 start_feed(GstElement* pipeline, guint size, App* app)
 {
-    if (app->sourceid == 0 && !app->eos)
+    if (!app->eos)
     {
         GST_DEBUG("start feeding");
         app->sourceid = g_idle_add((GSourceFunc)read_data, app);
@@ -92,17 +94,6 @@ stop_feed(GstElement* pipeline, App* app)
         GST_DEBUG("stop feeding");
         g_source_remove(app->sourceid);
         app->sourceid = 0;
-
-        /* signal eos */
-        g_signal_emit_by_name(app->appsrc, "end-of-stream", &ret);
-        app->eos = TRUE;
-    
-        /*if (ret != GST_FLOW_OK)
-        {
-            // some error, stop sending data
-            GST_DEBUG("some error %d", ret);
-        }
-        */
     }
 }
 
@@ -120,12 +111,19 @@ stop(GstElement* appsink, App* app)
 static void
 new_sample(GstElement* appsink, App* app)
 {
-    GST_DEBUG("new-sample");
+    GST_DEBUG("new sample");
+
     GstSample* sample;
+    //sample = gst_app_sink_pull_sample(GST_APP_SINK(appsink));
     g_signal_emit_by_name(appsink, "pull-sample", &sample, NULL);
 
     GstBuffer* buffer = gst_sample_get_buffer(sample);
     gst_buffer_extract(buffer, 0, app->data, HEIGHT * WIDTH * 4);
+
+
+    gst_sample_unref(sample);
+
+    return;
 
     /*FILE* pFile;
     pFile = fopen(fmt::format("{}", app->count++).c_str(), "wb");
@@ -188,11 +186,11 @@ void setup()
     check_error(&error);
     g_assert(app->pipeline);
 
-    app->bus = gst_pipeline_get_bus(GST_PIPELINE(app->pipeline));
-    g_assert(app->bus);
+    //app->bus = gst_pipeline_get_bus(GST_PIPELINE(app->pipeline));
+    //g_assert(app->bus);
 
     /* add watch for messages */
-    gst_bus_add_watch(app->bus, (GstBusFunc)bus_message, app);
+    //gst_bus_add_watch(app->bus, (GstBusFunc)bus_message, app);
 
     /* get the appsrc */
     app->appsrc = gst_bin_get_by_name(GST_BIN(app->pipeline), "mysource");
@@ -203,17 +201,18 @@ void setup()
     /* set the caps on the source */
     gst_video_info_set_format(&info, GST_VIDEO_FORMAT_RGBA, WIDTH, HEIGHT);
     caps = gst_video_info_to_caps(&info);
-    g_object_set(app->appsrc, "caps", caps, NULL);
+    g_object_set(app->appsrc, "caps", caps, "format", GST_FORMAT_TIME, "max-buffers", NUMBER, "max-bytes", NUMBER * WIDTH * HEIGHT * 4, "max-latency", -1, NULL);
     //gst_object_unref(caps);
 
     app->appsink = gst_bin_get_by_name(GST_BIN(app->pipeline), "mysink");
     g_assert(app->appsink);
     g_signal_connect(app->appsink, "eos", G_CALLBACK(stop), app);
     g_signal_connect(app->appsink, "new-sample", G_CALLBACK(new_sample), app);
-    g_object_set(app->appsink, "wait-on-eos", TRUE, "emit-signals", TRUE, NULL);
+    g_object_set(app->appsink, "wait-on-eos", TRUE, "emit-signals", TRUE, "max-buffers", NUMBER, "async", FALSE, NULL);
 
     app->data = g_malloc(WIDTH * HEIGHT * 4);
     app->buffer = gst_buffer_list_new_sized(NUMBER);
+    gst_mini_object_ref(GST_MINI_OBJECT(app->buffer));
 
     gst_buffer_list_make_writable(app->buffer);
     for (guint i = 0; i < NUMBER; i++)
@@ -240,7 +239,7 @@ void cleanup()
         gst_buffer_unref(buffer);
     }*/
     gst_buffer_list_unref(app->buffer);
-    gst_object_unref(app->bus);
+    //gst_object_unref(app->bus);
     g_main_loop_unref(app->loop);
     gst_object_unref(GST_OBJECT(app->appsrc));
     gst_object_unref(GST_OBJECT(app->appsink));

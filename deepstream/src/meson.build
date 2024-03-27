@@ -5,6 +5,7 @@ project('deepstream-test', 'cpp',
 deps = [
   dependency('gstreamer-1.0'),
   dependency('gstreamer-video-1.0'),
+  dependency('gstreamer-app-1.0'),
 ]
 
 executable('deepstream-test',
