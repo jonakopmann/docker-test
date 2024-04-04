@@ -44,13 +44,14 @@ ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
 RUN ln -s /usr/lib/x86_64-linux-gnu/pkgconfig/python3.pc /usr/lib/x86_64-linux-gnu/pkgconfig/python.pc
 
-RUN git clone https://github.com/ufo-kit/ufo-core.git && \
-    git clone https://github.com/ufo-kit/ufo-filters.git
+#RUN git clone https://github.com/ufo-kit/ufo-core.git
+RUN git clone https://github.com/ufo-kit/ufo-filters.git
+COPY ./ufo-core ./ufo-core
 
 RUN cd /ufo-core && meson build && cd build && ninja install
 #RUN cd /ufo-core/python && python3 setup.py install
 RUN cd /ufo-filters && meson build && cd build && ninja install
-RUN rm -rf /ufo-core /ufo-filters
+#RUN rm -rf /ufo-core /ufo-filters
 
 COPY ./src /ufo-test
 

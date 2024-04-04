@@ -12,6 +12,8 @@ typedef struct _CustomData
     UfoTaskGraph* graph;
     UfoPluginManager* manager;
     UfoBaseScheduler* scheduler;
+    UfoResources* res;
+    cl_mem buffer;
 
     UfoTaskNode* memory_in;
     UfoTaskNode* flip;
@@ -28,13 +30,42 @@ check_error(GError** error)
     }
 }
 
-gint test()
-{
-    CustomData data;
-    GError* error = NULL;
+CustomData data;
 
+void init()
+{
     /* Initialize cumstom data structure */
     memset(&data, 0, sizeof(data));
+
+    GError* error = NULL;
+
+    data.res = ufo_resources_new(&error);
+    if (error != NULL)
+    {
+        g_error("resources: %s", (error)->message);
+        exit(-1);
+    }
+
+    cl_context ctx = (cl_context)ufo_resources_get_context(data.res);
+
+    cl_int error2;
+    data.buffer = clCreateBuffer(ctx, CL_MEM_HOST_NO_ACCESS, WIDTH * HEIGHT * 4 * NUMBER, NULL, &error2);
+    if (error2 != 0)
+    {
+        g_error("buffer: %d", error2);
+        exit(-1);
+    }
+}
+
+void free()
+{
+    clReleaseMemObject(data.buffer);
+    g_object_unref(data.res);
+}
+
+gint test()
+{
+    GError* error = NULL;
 
     /* Initialize Ufo */
     data.graph = UFO_TASK_GRAPH(ufo_task_graph_new());
@@ -42,34 +73,31 @@ gint test()
 
     /* Create the tasks */
     data.memory_in = ufo_plugin_manager_get_task(data.manager, "memory-in", &error);
-    check_error(&error);
-    data.flip = ufo_plugin_manager_get_task(data.manager, "flip", &error);
-    check_error(&error);
-    data.memory_out = ufo_plugin_manager_get_task(data.manager, "memory-out", &error);
-    check_error(&error);
-
-    /*gpointer buffer = g_malloc0(WIDTH * HEIGHT * NUMBER * 4);
-    for (guint32 i = 0; i < NUMBER; i++)
+    if (error != NULL)
     {
-        memset((gint8*)buffer + i * WIDTH * HEIGHT * 4, 0xFF, WIDTH * HEIGHT * 2);
-    }*/
+        g_error("memory-in: %s", (error)->message);
+        exit(-1);
+    }
+    data.flip = ufo_plugin_manager_get_task(data.manager, "flip", &error);
+    if (error != NULL)
+    {
+        g_error("flip: %s", (error)->message);
+        exit(-1);
+    }
+    data.memory_out = ufo_plugin_manager_get_task(data.manager, "memory-out", &error);
+    if (error != NULL)
+    {
+        g_error("memory-out: %s", (error)->message);
+        exit(-1);
+    }
     
     data.scheduler = ufo_scheduler_new();
-    //g_object_set(data.scheduler, "enable-tracing", TRUE, NULL);
 
-    auto res = ufo_resources_new(&error);
-    check_error(&error);
-
-    cl_context ctx = (cl_context)ufo_resources_get_context(res);
-
-    cl_int error2;
-    cl_mem buffer = clCreateBuffer(ctx, CL_MEM_HOST_NO_ACCESS, WIDTH * HEIGHT * 4 * NUMBER, NULL, &error2);
-
-    ufo_base_scheduler_set_resources(data.scheduler, res);
+    ufo_base_scheduler_set_resources(data.scheduler, data.res);
 
     /* Configure memory-in */
     g_object_set(G_OBJECT(data.memory_in),
-        "pointer", buffer,
+        "pointer", data.buffer,
         "width", WIDTH,
         "height", HEIGHT,
         "number", NUMBER,
@@ -94,16 +122,17 @@ gint test()
     ufo_task_graph_connect_nodes(data.graph, data.flip, data.memory_out);
 
     /* Run graph */
-
     auto t1 = std::chrono::high_resolution_clock::now();
 
     ufo_base_scheduler_run(data.scheduler, data.graph, &error);
 
     auto t2 = std::chrono::high_resolution_clock::now();
 
-    check_error(&error);
-
-    clReleaseMemObject(buffer);
+    if (error != NULL)
+    {
+        g_error("run: %s", (error)->message);
+        exit(-1);
+    }
     g_free(outBuffer);
 
     /* Destroy all objects */
@@ -111,7 +140,6 @@ gint test()
     g_object_unref(data.flip);
     g_object_unref(data.memory_out);
     g_object_unref(data.graph);
-    g_object_unref(res);
     g_object_unref(data.scheduler);
     g_object_unref(data.manager);
 
@@ -121,15 +149,22 @@ gint test()
 int
 main(int argc, char* argv[])
 {
+    if (argc == 1)
+    {
+        
+    }
+
     gint count = 10;
     glong sum = 0;
 
+    init();
     gint* values = new gint[count];
     for (gint i = 0; i < count; i++)
     {
         values[i] = test();
         sum += values[i];
     }
+    free();
 
     gdouble mean = (gdouble)sum / count;
 

@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <chrono>
 #include <cmath>
-#include <fmt/core.h>
 
 #include "values.h"
 
@@ -118,8 +117,7 @@ new_sample(GstElement* appsink, App* app)
     g_signal_emit_by_name(appsink, "pull-sample", &sample, NULL);
 
     GstBuffer* buffer = gst_sample_get_buffer(sample);
-    gst_buffer_extract(buffer, 0, app->data, HEIGHT * WIDTH * 4);
-
+    //gst_buffer_extract(buffer, 0, app->data, HEIGHT * WIDTH * 4);
 
     gst_sample_unref(sample);
 
@@ -178,54 +176,30 @@ void setup()
     GstCaps* caps;
     GstVideoInfo info;
 
-    /* create a mainloop to get messages and to handle the idle handler that will
-     * feed data to appsrc. */
-    app->loop = g_main_loop_new(NULL, TRUE);
-
     app->pipeline = gst_parse_launch("appsrc name=mysource ! videoflip method=horizontal-flip ! appsink name=mysink", &error);
     check_error(&error);
     g_assert(app->pipeline);
 
-    //app->bus = gst_pipeline_get_bus(GST_PIPELINE(app->pipeline));
-    //g_assert(app->bus);
-
-    /* add watch for messages */
-    //gst_bus_add_watch(app->bus, (GstBusFunc)bus_message, app);
-
     /* get the appsrc */
     app->appsrc = gst_bin_get_by_name(GST_BIN(app->pipeline), "mysource");
     g_assert(app->appsrc);
-    g_signal_connect(app->appsrc, "need-data", G_CALLBACK(start_feed), app);
-    g_signal_connect(app->appsrc, "enough-data", G_CALLBACK(stop_feed), app);
 
     /* set the caps on the source */
     gst_video_info_set_format(&info, GST_VIDEO_FORMAT_RGBA, WIDTH, HEIGHT);
     caps = gst_video_info_to_caps(&info);
-    g_object_set(app->appsrc, "caps", caps, "format", GST_FORMAT_TIME, "max-buffers", NUMBER, "max-bytes", NUMBER * WIDTH * HEIGHT * 4, "max-latency", -1, NULL);
-    //gst_object_unref(caps);
+    g_object_set(app->appsrc,
+                "caps", caps,
+                "format", GST_FORMAT_TIME,
+                "max-buffers", NUMBER,
+                "max-bytes", NUMBER * WIDTH * HEIGHT * 4, NULL);
 
     app->appsink = gst_bin_get_by_name(GST_BIN(app->pipeline), "mysink");
     g_assert(app->appsink);
-    g_signal_connect(app->appsink, "eos", G_CALLBACK(stop), app);
-    g_signal_connect(app->appsink, "new-sample", G_CALLBACK(new_sample), app);
-    g_object_set(app->appsink, "wait-on-eos", TRUE, "emit-signals", TRUE, "max-buffers", NUMBER, "async", FALSE, NULL);
+    g_object_set(app->appsink,
+                "max-buffers", NUMBER,
+                "async", false, NULL);
 
     app->data = g_malloc(WIDTH * HEIGHT * 4);
-    app->buffer = gst_buffer_list_new_sized(NUMBER);
-    gst_mini_object_ref(GST_MINI_OBJECT(app->buffer));
-
-    gst_buffer_list_make_writable(app->buffer);
-    for (guint i = 0; i < NUMBER; i++)
-    {
-        GstBuffer* buffer = gst_buffer_new_allocate(NULL, HEIGHT * WIDTH * 4, NULL);
-
-        if (i == 0)
-        {
-            gst_buffer_memset(buffer, 0, 0xFF, HEIGHT * WIDTH * 2);
-        }
-        gst_buffer_list_add(app->buffer, buffer);
-        //gst_buffer_unref(buffer);
-    }
 }
 
 void cleanup()
@@ -240,7 +214,7 @@ void cleanup()
     }*/
     gst_buffer_list_unref(app->buffer);
     //gst_object_unref(app->bus);
-    g_main_loop_unref(app->loop);
+    //g_main_loop_unref(app->loop);
     gst_object_unref(GST_OBJECT(app->appsrc));
     gst_object_unref(GST_OBJECT(app->appsink));
     gst_object_unref(GST_OBJECT(app->pipeline));
@@ -249,23 +223,48 @@ void cleanup()
 gint test()
 {
     App* app = &s_app;
-    
-    app->t1 = std::chrono::high_resolution_clock::now();
 
-    app->eos = FALSE;
+    app->buffer = gst_buffer_list_new_sized(NUMBER);
+
+    gst_buffer_list_make_writable(app->buffer);
+    for (guint i = 0; i < NUMBER; i++)
+    {
+        GstBuffer* buffer = gst_buffer_new_allocate(NULL, HEIGHT * WIDTH * 4, NULL);
+
+        if (i == 0)
+        {
+            gst_buffer_memset(buffer, 0, 0xFF, HEIGHT * WIDTH * 2);
+        }
+        gst_buffer_list_add(app->buffer, buffer);
+    }
+    
+    auto t1 = std::chrono::high_resolution_clock::now();
 
     /* go to playing and wait in a mainloop. */
     gst_element_set_state(app->pipeline, GST_STATE_PLAYING);
 
-    /* this mainloop is stopped when we receive an error or EOS */
-    g_main_loop_run(app->loop);
+    GstFlowReturn ret;
+    ret = gst_app_src_push_buffer_list(GST_APP_SRC(app->appsrc), app->buffer);
+
+    if (ret != GST_FLOW_OK)
+    {
+        GST_DEBUG("failed to push buffers %d", ret);
+    }
+
+    for (gint i = 0; i < NUMBER; i++)
+    {
+        GstSample* sample = gst_app_sink_pull_sample(GST_APP_SINK(app->appsink));
+        g_assert(sample);
+    }
+
+    auto t2 = std::chrono::high_resolution_clock::now();
 
     GST_DEBUG("stopping");
 
     gst_element_set_state(app->pipeline, GST_STATE_NULL);
     gst_element_set_state(app->pipeline, GST_STATE_READY);
 
-    return app->ms_int;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
 }
 
 int
@@ -297,7 +296,8 @@ main(int argc, char* argv[])
     }
 
     gdouble stdDev = std::sqrt(sum2 / (count - 1));
-    
+
+    // TODO: max value
     std::cout << "Mean: " << mean << " ms" <<std::endl;
     std::cout << "Standard Deviation: " << stdDev << " ms" << std::endl;
 
