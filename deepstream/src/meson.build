@@ -6,6 +6,8 @@ deps = [
   dependency('gstreamer-1.0'),
   dependency('gstreamer-video-1.0'),
   dependency('gstreamer-app-1.0'),
+  dependency('cuda'),
+  dependency('deepstream'),
 ]
 
 executable('deepstream-test',

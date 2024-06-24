@@ -2,6 +2,8 @@
 #include <gst/video/video.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
+#include <cuda_runtime_api.h>
+#include <nvbufsurface.h>
 
 #include <stdio.h>
 #include <iostream>
@@ -176,7 +178,7 @@ void setup()
     GstCaps* caps;
     GstVideoInfo info;
 
-    app->pipeline = gst_parse_launch("appsrc name=mysource ! nvvideoconvert flip-method=4 ! appsink name=mysink", &error);
+    app->pipeline = gst_parse_launch("appsrc name=mysource ! nvvideoconvert flip-method=4 nvbuf-memory-type=2 ! appsink name=mysink", &error);
     check_error(&error);
     g_assert(app->pipeline);
 
@@ -187,6 +189,8 @@ void setup()
     /* set the caps on the source */
     gst_video_info_set_format(&info, GST_VIDEO_FORMAT_RGBA, WIDTH, HEIGHT);
     caps = gst_video_info_to_caps(&info);
+    GstCapsFeatures* feature = gst_caps_features_new("memory:NVMM", NULL);
+    gst_caps_set_features (caps, 0, feature);
     g_object_set(app->appsrc,
                 "caps", caps,
                 "format", GST_FORMAT_TIME,
@@ -212,13 +216,30 @@ void cleanup()
         GstBuffer* buffer = gst_buffer_list_get(app->buffer, i);
         gst_buffer_unref(buffer);
     }*/
-    gst_buffer_list_unref(app->buffer);
+    //gst_buffer_list_unref(app->buffer);
     //gst_object_unref(app->bus);
     //g_main_loop_unref(app->loop);
     gst_object_unref(GST_OBJECT(app->appsrc));
     gst_object_unref(GST_OBJECT(app->appsink));
     gst_object_unref(GST_OBJECT(app->pipeline));
 }
+
+static void
+outbuf_unref_callback (gpointer data)
+{
+  NvBufSurface *nvbufsurface = (NvBufSurface *) data;
+  if (data != NULL) {
+    NvBufSurfaceDestroy(nvbufsurface);
+  }
+}
+
+#define CHECK_CUDA_STATUS(cuda_status,error_str) do { \
+  if ((cuda_status) != cudaSuccess) { \
+    g_error ("Error: %s in %s at line %d (%s)\n", \
+        error_str, __FILE__, __LINE__, cudaGetErrorName(cuda_status)); \
+    break; \
+  } \
+} while (0)
 
 gint test()
 {
@@ -229,11 +250,31 @@ gint test()
     gst_buffer_list_make_writable(app->buffer);
     for (guint i = 0; i < NUMBER; i++)
     {
-        GstBuffer* buffer = gst_buffer_new_allocate(NULL, HEIGHT * WIDTH * 4, NULL);
+        NvBufSurfaceCreateParams params;
+        CHECK_CUDA_STATUS (cudaSetDevice(0), "Unable to set cuda device");
+        params.gpuId = 0;
+        params.width = WIDTH;
+        params.height = HEIGHT;
+        params.size = HEIGHT * WIDTH * 4;
+        params.isContiguous = FALSE;
+        params.colorFormat = NVBUF_COLOR_FORMAT_RGBA;
+        params.layout = NVBUF_LAYOUT_PITCH;
+        params.memType = NVBUF_MEM_CUDA_UNIFIED;
+
+        NvBufSurface* nvbufsurface;
+
+        if (NvBufSurfaceCreate(&nvbufsurface, 1, &params) != 0)
+        {
+            g_error("failed to alloc buffer");
+        }
+
+        NvBufSurfaceMemSet(nvbufsurface, -1, -1, 0x00);
+
+        GstBuffer* buffer = gst_buffer_new_wrapped_full ((GstMemoryFlags)0, nvbufsurface, sizeof (NvBufSurface), 0, sizeof (NvBufSurface), nvbufsurface, outbuf_unref_callback);
 
         if (i == 0)
         {
-            gst_buffer_memset(buffer, 0, 0xFF, HEIGHT * WIDTH * 2);
+            NvBufSurfaceMemSet(nvbufsurface, -1, -1, 0xFF);
         }
         gst_buffer_list_add(app->buffer, buffer);
     }
@@ -255,6 +296,9 @@ gint test()
     {
         GstSample* sample = gst_app_sink_pull_sample(GST_APP_SINK(app->appsink));
         g_assert(sample);
+        GstBuffer* buffer = gst_sample_get_buffer(sample);
+        
+        gst_sample_unref(sample);
     }
 
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -281,10 +325,12 @@ main(int argc, char* argv[])
     glong sum = 0;
 
     gint* values = new gint[count];
+    gint max = 0;
     for (gint i = 0; i < count; i++)
     {
         values[i] = test();
         sum += values[i];
+        max = std::max(max, values[i]);
     }
 
     gdouble mean = (gdouble)sum / count;
@@ -297,9 +343,9 @@ main(int argc, char* argv[])
 
     gdouble stdDev = std::sqrt(sum2 / (count - 1));
 
-    // TODO: max value
     std::cout << "Mean: " << mean << " ms" <<std::endl;
     std::cout << "Standard Deviation: " << stdDev << " ms" << std::endl;
+    std::cout << "Max: " << max << " ms" <<std::endl;
 
     cleanup();
 

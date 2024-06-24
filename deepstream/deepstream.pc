@@ -1,0 +1,12 @@
+prefix=/opt/nvidia/deepstream/deepstream-7.0/
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/sources/includes
+toolsdir=${exec_prefix}/bin
+
+Name: DeepStream
+Description: NVIDIA DeepStream SDK
+Version: 6.4
+Requires: gstreamer-1.0 >= 1.14.1
+Libs: -L${libdir} -lnvbufsurface -lnvbufsurftransform -ldl -lpthread -lcuda -Wl,-rpath,${libdir}
+Cflags: -I${includedir}
