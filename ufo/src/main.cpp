@@ -149,20 +149,17 @@ gint test()
 int
 main(int argc, char* argv[])
 {
-    if (argc == 1)
-    {
-        
-    }
-
-    gint count = 10;
+    gint count = 3600;
     glong sum = 0;
 
     init();
     gint* values = new gint[count];
+    gint max = 0;
     for (gint i = 0; i < count; i++)
     {
         values[i] = test();
         sum += values[i];
+        max = std::max(max, values[i]);
     }
     free();
 
@@ -178,6 +175,7 @@ main(int argc, char* argv[])
     
     std::cout << "Mean: " << mean << " ms" <<std::endl;
     std::cout << "Standard Deviation: " << stdDev << " ms" << std::endl;
+    std::cout << "Max: " << max << " ms" <<std::endl;
 
     return 0;
 }

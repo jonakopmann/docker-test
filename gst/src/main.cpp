@@ -255,6 +255,7 @@ gint test()
     {
         GstSample* sample = gst_app_sink_pull_sample(GST_APP_SINK(app->appsink));
         g_assert(sample);
+        gst_sample_unref(sample);
     }
 
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -277,14 +278,16 @@ main(int argc, char* argv[])
     
     setup();
 
-    gint count = 10;
+    gint count = 3600;
     glong sum = 0;
 
     gint* values = new gint[count];
+    gint max = 0;
     for (gint i = 0; i < count; i++)
     {
         values[i] = test();
         sum += values[i];
+        max = std::max(max, values[i]);
     }
 
     gdouble mean = (gdouble)sum / count;
@@ -300,6 +303,7 @@ main(int argc, char* argv[])
     // TODO: max value
     std::cout << "Mean: " << mean << " ms" <<std::endl;
     std::cout << "Standard Deviation: " << stdDev << " ms" << std::endl;
+    std::cout << "Max: " << max << " ms" <<std::endl;
 
     cleanup();
 
