@@ -321,7 +321,7 @@ main(int argc, char* argv[])
     
     setup();
 
-    gint count = 10;
+    gint count = 3600;
     glong sum = 0;
 
     gint* values = new gint[count];
